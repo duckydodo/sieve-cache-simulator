@@ -1,0 +1,4 @@
+workload,trace,seed,accesses,capacity,policy,hits,misses,evictions,hit_ratio,miss_ratio,elapsed_ns
+uniform,traces/uniform.txt,42,1000,64,FIFO,307,693,629,0.307000,0.693000,150257
+uniform,traces/uniform.txt,42,1000,64,LRU,295,705,641,0.295000,0.705000,124065
+uniform,traces/uniform.txt,42,1000,64,SIEVE,300,700,636,0.300000,0.700000,111811

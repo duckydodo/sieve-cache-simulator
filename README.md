@@ -1,32 +1,44 @@
 # SIEVE Cache Simulator
 
-A user-space cache simulator implementing FIFO, LRU, and SIEVE eviction algorithms for the research paper "SIEVE is Simpler than LRU: An Efficient Turn-Key Eviction Algorithm for Web Caches" (USENIX NSDI 2024).
+A user-space cache simulator implementing FIFO, LRU, and SIEVE eviction algorithms,
+based on the research paper *"SIEVE is Simpler than LRU: An Efficient Turn-Key Eviction
+Algorithm for Web Caches"* (Zhang et al., USENIX NSDI 2024).
 
 ## Project Structure
 
 ```
 SIEVE/
-├── include/           # Public headers
-│   ├── cache.h        # Cache manager and policy interface
-│   ├── dlist.h        # Doubly linked list
-│   ├── hashtable.h    # Fixed-bucket hash table
-│   └── tracegen.h     # Trace generator
-├── src/               # Implementation
-│   ├── cache.c        # Cache manager
-│   ├── fifo.c         # FIFO eviction policy
-│   ├── lru.c          # LRU eviction policy
-│   ├── sieve.c        # SIEVE eviction policy
-│   ├── dlist.c        # Doubly linked list
-│   ├── hashtable.c    # Hash table
-│   ├── tracegen.c     # Trace generator
-│   └── benchmark.c    # Benchmark runner
-├── tests/             # Unit tests
-│   ├── test_ds.c      # Data structure tests
-│   ├── test_policies.c# Cache policy tests
-│   ├── test_tracegen.c# Trace generator tests
-│   └── test_benchmark.c# Benchmark tests
-├── tools/             # Standalone tools
-│   └── tracegen.c     # Trace generator CLI
+├── include/               # Public headers
+│   ├── cache.h            # Cache manager and policy interface
+│   ├── benchmark.h        # Benchmark runner interface
+│   ├── dlist.h            # Doubly linked list
+│   ├── hashtable.h        # Fixed-bucket hash table
+│   └── tracegen.h         # Trace generator
+├── src/                   # Implementation
+│   ├── cache.c            # Cache manager
+│   ├── fifo.c             # FIFO eviction policy
+│   ├── lru.c              # LRU eviction policy
+│   ├── sieve.c            # SIEVE eviction policy (NSDI '24 Algorithm 1)
+│   ├── dlist.c            # Doubly linked list
+│   ├── hashtable.c        # Hash table (MurmurHash3 fmix64)
+│   ├── tracegen.c         # Trace generator library
+│   └── benchmark.c        # Benchmark runner
+├── tests/                 # Unit and integration tests
+│   ├── test_ds.c          # Data structure tests (479 assertions)
+│   ├── test_policies.c    # Cache policy tests (320 assertions)
+│   ├── test_tracegen.c    # Trace generator tests (50,483 assertions)
+│   └── test_benchmark.c   # Benchmark tests (216 assertions)
+├── tools/                 # Standalone CLI tools
+│   └── tracegen.c         # Trace generator CLI
+├── experiments/           # Milestone 6 experiment scripts
+│   ├── run_experiment.py  # Full experiment runner (traces → CSV → summary)
+│   └── plot_results.py    # Graph generator (requires matplotlib)
+├── traces/exp/            # Generated trace files (created by run_experiment.py)
+├── results/               # Experiment outputs
+│   ├── raw_results.csv    # All benchmark rows
+│   ├── summary.csv        # Mean/std hit ratios per workload/capacity/policy
+│   ├── ANALYSIS.md        # Experimental analysis and interpretation
+│   └── figures/           # Visual plots (created by plot_results.py when matplotlib is installed)
 ├── Makefile
 └── README.md
 ```
@@ -152,6 +164,71 @@ mkdir -p traces results
 ./bin/benchmark -t traces/uniform.txt -c 256 -w uniform -s 42 -o results/uniform_c256.csv
 ```
 
+## Experiments
+
+Milestone 6 provides automated scripts in `experiments/` to evaluate FIFO, LRU, and SIEVE across multiple workloads, seeds, and cache capacities, compute aggregated statistics, and generate comparison plots.
+
+### Running Experiments
+
+Run the full evaluation matrix (5 workloads × 6 capacities × multiple seeds = 198 benchmark runs):
+
+```bash
+make experiment
+# or: python3 experiments/run_experiment.py
+```
+
+Run a quick reduced-size evaluation (smaller trace sizes and fewer capacities) for fast verification:
+
+```bash
+make experiment-quick
+# or: python3 experiments/run_experiment.py --quick
+```
+
+Regenerate the Markdown analysis from existing summary CSV data without re-running benchmarks:
+
+```bash
+python3 experiments/run_experiment.py --analysis-only
+```
+
+### Experiment Outputs
+
+Results and traces are written to the following locations:
+
+| Path | Description |
+|------|-------------|
+| `results/raw_results.csv` | Full benchmark records for every policy, capacity, and seed (198 rows) |
+| `results/summary.csv` | Mean and standard deviation metrics grouped by workload, capacity, and policy (90 rows) |
+| `results/ANALYSIS.md` | In-depth experimental analysis, findings, workload behavior, and limitations |
+| `traces/exp/` | Synthetic trace files generated for the evaluation matrix |
+| `results/figures/` | Destination folder for visual plots (generated when running `make plot`) |
+
+### Plotting and Matplotlib Dependency
+
+Data collection, CSV generation, and analysis do not require any external Python packages (they use only standard C and Python libraries).
+
+Generating graphical plots (`make plot`) requires `matplotlib`. To install `matplotlib` in a reproducible project-local virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install matplotlib
+```
+
+Once `matplotlib` is installed, generate the figures:
+
+```bash
+make plot
+# or: python3 experiments/plot_results.py
+```
+
+When generated, figures are saved to `results/figures/`:
+- `results/figures/hit_ratio_vs_capacity.png`: Hit ratio vs cache capacity across all workloads
+- `results/figures/policy_comparison.png`: Policy comparison bar chart at maximum capacity
+- `results/figures/execution_time.png`: Mean execution runtime per workload and policy
+
+> [!NOTE]
+> Figures are not created by default until `make plot` (or `python3 experiments/plot_results.py`) is run with `matplotlib` installed. If `matplotlib` is missing, `make plot` exits with clear installation instructions, while `make experiment` completes CSV and analysis generation normally.
+
 ## Implementation Notes
 
 ### Cache Keys
@@ -178,10 +255,12 @@ mkdir -p traces results
 
 ## Dependencies
 
-- C11 compiler (gcc or clang)
+- C11 compiler (`gcc` or `clang`)
 - Standard C library
 - POSIX `clock_gettime()` for timing
-- libm for math functions (tracegen only)
+- `libm` for math functions (tracegen only)
+- Python 3.8+ (standard library only for experiment runner and CSV analysis)
+- `matplotlib` (optional, required only for generating visual plots via `make plot`)
 
 ## License
 

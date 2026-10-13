@@ -8,7 +8,7 @@ POLICY_SRCS = src/cache.c src/fifo.c src/lru.c src/sieve.c $(DS_SRCS)
 TRACE_SRCS = src/tracegen.c
 BENCHMARK_SRCS = src/benchmark.c $(POLICY_SRCS)
 
-.PHONY: all asan test clean
+.PHONY: all asan test experiment plot clean
 
 all: bin/test_ds bin/test_policies bin/test_tracegen bin/tracegen bin/benchmark
 
@@ -44,6 +44,18 @@ test: bin/test_ds bin/test_policies bin/test_tracegen bin/tracegen bin/test_benc
 	./bin/test_policies
 	./bin/test_tracegen
 	./bin/test_benchmark
+
+# Run the full Milestone 6 experiment (generates traces, benchmarks, and CSVs)
+experiment: all
+	python3 experiments/run_experiment.py
+
+# Quick reduced-size experiment (fast check, same code paths)
+experiment-quick: all
+	python3 experiments/run_experiment.py --quick
+
+# Generate graphs from existing results/summary.csv (requires matplotlib)
+plot:
+	python3 experiments/plot_results.py
 
 clean:
 	rm -rf bin obj

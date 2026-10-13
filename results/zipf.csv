@@ -1,0 +1,4 @@
+workload,trace,seed,accesses,capacity,policy,hits,misses,evictions,hit_ratio,miss_ratio,elapsed_ns
+zipf,traces/zipf.txt,99,5000,50,FIFO,2330,2670,2620,0.466000,0.534000,469509
+zipf,traces/zipf.txt,99,5000,50,LRU,2619,2381,2331,0.523800,0.476200,539587
+zipf,traces/zipf.txt,99,5000,50,SIEVE,2996,2004,1954,0.599200,0.400800,383960
