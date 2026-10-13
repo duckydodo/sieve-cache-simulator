@@ -150,7 +150,7 @@ always better.
 | `results/summary.csv` | Mean and std-dev hit ratios, grouped by workload/capacity/policy | Generated (90 rows) |
 | `results/ANALYSIS.md` | Experimental analysis and interpretation | Generated |
 | `traces/exp/` | Generated trace files (one per workload/seed combination) | Generated (11 traces) |
-| `results/figures/*.png` | Visual comparison plots (requires matplotlib) | Not generated (optional; run 'make plot' with matplotlib installed) |
+| `results/figures/*.png` | Visual comparison plots (requires matplotlib) | Generated |
 
 *Note: Visual plots in `results/figures/` are optional and require `matplotlib`. When `matplotlib` is not installed, data collection, CSV generation, and analysis run without error. To generate plots, see README.md for instructions on setting up a virtual environment.*
 

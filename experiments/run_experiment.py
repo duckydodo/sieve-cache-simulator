@@ -329,7 +329,7 @@ def run_benchmarks(workload_defs, capacities):
 def write_raw_csv(rows):
     out_path = RESULTS_DIR / "raw_results.csv"
     with open(out_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_HEADER)
+        writer = csv.DictWriter(f, fieldnames=CSV_HEADER, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     print(f"  Raw CSV written: {out_path.relative_to(PROJECT_ROOT)}")
@@ -389,7 +389,7 @@ def compute_summary(rows):
 def write_summary_csv(summary):
     out_path = RESULTS_DIR / "summary.csv"
     with open(out_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SUMMARY_HEADER)
+        writer = csv.DictWriter(f, fieldnames=SUMMARY_HEADER, lineterminator="\n")
         writer.writeheader()
         writer.writerows(summary)
     print(f"  Summary CSV written: {out_path.relative_to(PROJECT_ROOT)}")
