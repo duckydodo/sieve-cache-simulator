@@ -1,0 +1,170 @@
+{
+  "project": "Implementation and Evaluation of the SIEVE Cache Eviction Algorithm",
+  "reference_paper": {
+    "title": "SIEVE is Simpler than LRU: An Efficient Turn-Key Eviction Algorithm for Web Caches",
+    "authors": "Yazhuo Zhang et al.",
+    "venue": "USENIX NSDI 2024",
+    "url": "https://www.usenix.org/system/files/nsdi24-zhang-yazhuo.pdf"
+  },
+  "simulator": {
+    "type": "Single-threaded user-space cache simulator",
+    "language": "C11",
+    "compiler_flags": "-std=c11 -Wall -Wextra -Wpedantic",
+    "timing_source": "clock_gettime(CLOCK_MONOTONIC)",
+    "timing_isolation": "POSIX CLOCK_MONOTONIC tightly wrapped around cache access loop, excluding trace reading, allocation, and CSV output",
+    "policies": [
+      "FIFO",
+      "LRU",
+      "SIEVE"
+    ]
+  },
+  "experiment_configuration": {
+    "mode": "full",
+    "capacities": [
+      8,
+      16,
+      32,
+      64,
+      128,
+      256
+    ],
+    "stochastic_seeds": [
+      42,
+      1337,
+      99991
+    ],
+    "workloads": [
+      {
+        "name": "uniform",
+        "tracegen_args": [
+          "-w",
+          "uniform",
+          "-n",
+          "20000",
+          "-k",
+          "1000"
+        ],
+        "key_range": 1000,
+        "accesses": 20000,
+        "seeds": [
+          42,
+          1337,
+          99991
+        ]
+      },
+      {
+        "name": "zipf",
+        "tracegen_args": [
+          "-w",
+          "zipf",
+          "-n",
+          "20000",
+          "-k",
+          "1000",
+          "-a",
+          "1.0"
+        ],
+        "key_range": 1000,
+        "accesses": 20000,
+        "seeds": [
+          42,
+          1337,
+          99991
+        ]
+      },
+      {
+        "name": "loop",
+        "tracegen_args": [
+          "-w",
+          "loop",
+          "-n",
+          "20000",
+          "-k",
+          "200"
+        ],
+        "key_range": 200,
+        "accesses": 20000,
+        "seeds": [
+          0
+        ]
+      },
+      {
+        "name": "scan",
+        "tracegen_args": [
+          "-w",
+          "scan",
+          "-n",
+          "5000"
+        ],
+        "key_range": 5000,
+        "accesses": 5000,
+        "seeds": [
+          0
+        ]
+      },
+      {
+        "name": "hot_scan",
+        "tracegen_args": [
+          "-w",
+          "hot_scan",
+          "-n",
+          "20000",
+          "--hot-size",
+          "100",
+          "--hot-frac",
+          "0.5"
+        ],
+        "key_range": null,
+        "accesses": 20000,
+        "seeds": [
+          42,
+          1337,
+          99991
+        ]
+      }
+    ],
+    "planned_benchmark_invocations": 66,
+    "expected_result_rows": 198
+  },
+  "metrics": {
+    "raw_csv_columns": [
+      "workload",
+      "trace",
+      "seed",
+      "accesses",
+      "distinct_keys",
+      "capacity",
+      "policy",
+      "hits",
+      "misses",
+      "evictions",
+      "hit_ratio",
+      "miss_ratio",
+      "elapsed_ns"
+    ],
+    "summary_csv_columns": [
+      "workload",
+      "capacity",
+      "policy",
+      "seed_count",
+      "mean_hit_ratio",
+      "std_hit_ratio",
+      "mean_miss_ratio",
+      "std_miss_ratio",
+      "mean_hit_ratio_pct",
+      "mean_elapsed_ns",
+      "std_elapsed_ns",
+      "mean_ns_per_access",
+      "std_ns_per_access",
+      "throughput_mops",
+      "total_accesses"
+    ]
+  },
+  "artifacts": {
+    "config_json": "experiments/config.json",
+    "raw_csv": "results/raw_results.csv",
+    "summary_csv": "results/summary.csv",
+    "analysis_doc": "results/ANALYSIS.md",
+    "figures_dir": "results/figures"
+  }
+}

@@ -86,6 +86,50 @@ static int run_benchmark_wrapper(const char *trace_file, size_t capacity, const 
         .trace_file = trace_file,
         .output_file = output_file,
         .capacity = capacity,
+        .capacities = NULL,
+        .num_capacities = 0,
+        .workload = workload,
+        .seed = 0,
+        .seed_provided = false
+    };
+
+    if (seed) {
+        unsigned long long seed_val;
+        if (sscanf(seed, "%llu", &seed_val) == 1) {
+            cfg.seed = (uint64_t)seed_val;
+            cfg.seed_provided = true;
+        }
+    }
+
+    uint64_t *keys = NULL;
+    size_t key_count = 0;
+
+    if (read_trace_keys(trace_file, &keys, &key_count) != 0) {
+        return -1;
+    }
+
+    FILE *out = fopen(output_file, "w");
+    if (!out) {
+        free(keys);
+        return -1;
+    }
+
+    int result = run_benchmark(out, &cfg, keys, key_count);
+
+    free(keys);
+    fclose(out);
+
+    return result;
+}
+
+static int run_benchmark_multi_wrapper(const char *trace_file, const size_t *caps, size_t num_caps,
+                                       const char *output_file, const char *workload, const char *seed) {
+    benchmark_config_t cfg = {
+        .trace_file = trace_file,
+        .output_file = output_file,
+        .capacity = (caps && num_caps > 0) ? caps[0] : 0,
+        .capacities = caps,
+        .num_capacities = num_caps,
         .workload = workload,
         .seed = 0,
         .seed_provided = false
@@ -125,9 +169,17 @@ static void parse_csv_field(const char *line, int field_index, char *out_field, 
     size_t pos = 0;
     bool in_quotes = false;
 
-    for (size_t i = 0; line[i] != '\0' && line[i] != '\n'; i++) {
+    for (size_t i = 0; line[i] != '\0' && line[i] != '\n' && line[i] != '\r'; i++) {
         if (line[i] == '"') {
-            in_quotes = !in_quotes;
+            if (in_quotes && line[i + 1] == '"') {
+                /* RFC 4180 escaped quote "" -> " */
+                if (current_field == field_index && pos < out_size - 1) {
+                    out_field[pos++] = '"';
+                }
+                i++;
+            } else {
+                in_quotes = !in_quotes;
+            }
         } else if (line[i] == ',' && !in_quotes) {
             if (current_field == field_index) {
                 break; /* target field is complete; stop before pos is reset */
@@ -170,11 +222,19 @@ static void test_tiny_known_trace(void) {
 
     for (int i = 1; i < 4; i++) {
         uint64_t accesses = parse_csv_uint64(lines[i], 3);
-        uint64_t hits = parse_csv_uint64(lines[i], 6);
-        uint64_t misses = parse_csv_uint64(lines[i], 7);
+        uint64_t distinct_keys = parse_csv_uint64(lines[i], 4);
+        uint64_t capacity = parse_csv_uint64(lines[i], 5);
+        uint64_t hits = parse_csv_uint64(lines[i], 7);
+        uint64_t misses = parse_csv_uint64(lines[i], 8);
+        uint64_t evictions = parse_csv_uint64(lines[i], 9);
+
         TEST_ASSERT(accesses == 6, "Access count is 6");
+        TEST_ASSERT(distinct_keys == 3, "Distinct keys count is 3");
+        TEST_ASSERT(capacity == 3, "Capacity is 3");
+        TEST_ASSERT(hits == 3, "Hits == 3");
+        TEST_ASSERT(misses == 3, "Misses == 3");
+        TEST_ASSERT(evictions == 0, "Evictions == 0 (all fit in capacity 3)");
         TEST_ASSERT(hits + misses == 6, "Hits + misses == accesses");
-        TEST_ASSERT(misses <= 6, "Misses <= accesses");
     }
 
     free_csv_lines(lines, line_count);
@@ -191,8 +251,12 @@ static void test_repeated_keys(void) {
     read_csv_lines(&lines, &line_count);
 
     for (int i = 1; i < 4; i++) {
-        uint64_t hits = parse_csv_uint64(lines[i], 6);
-        uint64_t misses = parse_csv_uint64(lines[i], 7);
+        uint64_t accesses = parse_csv_uint64(lines[i], 3);
+        uint64_t distinct_keys = parse_csv_uint64(lines[i], 4);
+        uint64_t hits = parse_csv_uint64(lines[i], 7);
+        uint64_t misses = parse_csv_uint64(lines[i], 8);
+        TEST_ASSERT(accesses == 5, "5 accesses");
+        TEST_ASSERT(distinct_keys == 1, "1 distinct key");
         TEST_ASSERT(hits == 4, "4 hits (1 miss, then 4 hits)");
         TEST_ASSERT(misses == 1, "1 miss");
     }
@@ -212,10 +276,14 @@ static void test_capacity_one(void) {
 
     for (int i = 1; i < 4; i++) {
         uint64_t accesses = parse_csv_uint64(lines[i], 3);
-        uint64_t hits = parse_csv_uint64(lines[i], 6);
-        uint64_t misses = parse_csv_uint64(lines[i], 7);
-        uint64_t evictions = parse_csv_uint64(lines[i], 8);
+        uint64_t distinct_keys = parse_csv_uint64(lines[i], 4);
+        uint64_t capacity = parse_csv_uint64(lines[i], 5);
+        uint64_t hits = parse_csv_uint64(lines[i], 7);
+        uint64_t misses = parse_csv_uint64(lines[i], 8);
+        uint64_t evictions = parse_csv_uint64(lines[i], 9);
         TEST_ASSERT(accesses == 3, "3 accesses");
+        TEST_ASSERT(distinct_keys == 3, "3 distinct keys");
+        TEST_ASSERT(capacity == 1, "Capacity 1");
         TEST_ASSERT(hits == 0, "0 hits");
         TEST_ASSERT(misses == 3, "3 misses");
         TEST_ASSERT(evictions == 2, "2 evictions");
@@ -235,8 +303,12 @@ static void test_key_zero(void) {
     read_csv_lines(&lines, &line_count);
 
     for (int i = 1; i < 4; i++) {
-        uint64_t hits = parse_csv_uint64(lines[i], 6);
-        uint64_t misses = parse_csv_uint64(lines[i], 7);
+        uint64_t accesses = parse_csv_uint64(lines[i], 3);
+        uint64_t distinct_keys = parse_csv_uint64(lines[i], 4);
+        uint64_t hits = parse_csv_uint64(lines[i], 7);
+        uint64_t misses = parse_csv_uint64(lines[i], 8);
+        TEST_ASSERT(accesses == 4, "4 accesses");
+        TEST_ASSERT(distinct_keys == 2, "2 distinct keys");
         TEST_ASSERT(hits == 2, "2 hits");
         TEST_ASSERT(misses == 2, "2 misses");
     }
@@ -257,8 +329,10 @@ static void test_key_uint64_max(void) {
     read_csv_lines(&csv_lines, &line_count);
 
     for (int i = 1; i < 4; i++) {
-        uint64_t hits = parse_csv_uint64(csv_lines[i], 6);
-        uint64_t misses = parse_csv_uint64(csv_lines[i], 7);
+        uint64_t distinct_keys = parse_csv_uint64(csv_lines[i], 4);
+        uint64_t hits = parse_csv_uint64(csv_lines[i], 7);
+        uint64_t misses = parse_csv_uint64(csv_lines[i], 8);
+        TEST_ASSERT(distinct_keys == 2, "2 distinct keys");
         TEST_ASSERT(hits == 1, "1 hit");
         TEST_ASSERT(misses == 2, "2 misses");
     }
@@ -310,6 +384,7 @@ static void test_csv_header_and_row_count(void) {
     TEST_ASSERT(strstr(header, "trace") != NULL, "Header contains 'trace'");
     TEST_ASSERT(strstr(header, "seed") != NULL, "Header contains 'seed'");
     TEST_ASSERT(strstr(header, "accesses") != NULL, "Header contains 'accesses'");
+    TEST_ASSERT(strstr(header, "distinct_keys") != NULL, "Header contains 'distinct_keys'");
     TEST_ASSERT(strstr(header, "capacity") != NULL, "Header contains 'capacity'");
     TEST_ASSERT(strstr(header, "policy") != NULL, "Header contains 'policy'");
     TEST_ASSERT(strstr(header, "hits") != NULL, "Header contains 'hits'");
@@ -318,6 +393,51 @@ static void test_csv_header_and_row_count(void) {
     TEST_ASSERT(strstr(header, "hit_ratio") != NULL, "Header contains 'hit_ratio'");
     TEST_ASSERT(strstr(header, "miss_ratio") != NULL, "Header contains 'miss_ratio'");
     TEST_ASSERT(strstr(header, "elapsed_ns") != NULL, "Header contains 'elapsed_ns'");
+
+    free_csv_lines(lines, line_count);
+}
+
+static void test_multiple_capacities(void) {
+    write_trace_file("1\n2\n3\n1\n2\n3\n4\n5\n");
+
+    size_t caps[] = {2, 4};
+    int result = run_benchmark_multi_wrapper(TEST_TRACE_FILE, caps, 2, TEST_OUTPUT_FILE, "multi_test", "7");
+    TEST_ASSERT(result == 0, "Benchmark succeeded with multiple capacities");
+
+    char **lines;
+    int line_count;
+    read_csv_lines(&lines, &line_count);
+
+    /* 1 header + (2 capacities * 3 policies) = 7 lines */
+    TEST_ASSERT(line_count == 7, "CSV has header + 6 policy rows for 2 capacities");
+
+    for (int i = 1; i <= 3; i++) {
+        uint64_t cap = parse_csv_uint64(lines[i], 5);
+        TEST_ASSERT(cap == 2, "First 3 rows are for capacity 2");
+    }
+    for (int i = 4; i <= 6; i++) {
+        uint64_t cap = parse_csv_uint64(lines[i], 5);
+        TEST_ASSERT(cap == 4, "Next 3 rows are for capacity 4");
+    }
+
+    free_csv_lines(lines, line_count);
+}
+
+static void test_csv_escaping(void) {
+    write_trace_file("10\n20\n30\n");
+
+    /* Workload with comma and quote */
+    int result = run_benchmark_wrapper(TEST_TRACE_FILE, 2, TEST_OUTPUT_FILE, "web,cache \"special\"", NULL);
+    TEST_ASSERT(result == 0, "Benchmark succeeded with special characters in workload");
+
+    char **lines;
+    int line_count;
+    read_csv_lines(&lines, &line_count);
+
+    TEST_ASSERT(line_count == 4, "4 lines in CSV");
+    char workload[128];
+    parse_csv_field(lines[1], 0, workload, sizeof(workload));
+    TEST_ASSERT(strcmp(workload, "web,cache \"special\"") == 0, "Escaped workload parsed back accurately");
 
     free_csv_lines(lines, line_count);
 }
@@ -334,12 +454,15 @@ static void test_metric_invariants(void) {
 
     for (int i = 1; i < 4; i++) {
         uint64_t accesses = parse_csv_uint64(lines[i], 3);
-        uint64_t hits = parse_csv_uint64(lines[i], 6);
-        uint64_t misses = parse_csv_uint64(lines[i], 7);
-        uint64_t evictions = parse_csv_uint64(lines[i], 8);
-        double hit_ratio = parse_csv_double(lines[i], 9);
-        double miss_ratio = parse_csv_double(lines[i], 10);
+        uint64_t distinct_keys = parse_csv_uint64(lines[i], 4);
+        uint64_t hits = parse_csv_uint64(lines[i], 7);
+        uint64_t misses = parse_csv_uint64(lines[i], 8);
+        uint64_t evictions = parse_csv_uint64(lines[i], 9);
+        double hit_ratio = parse_csv_double(lines[i], 10);
+        double miss_ratio = parse_csv_double(lines[i], 11);
 
+        TEST_ASSERT(distinct_keys <= accesses, "distinct_keys <= accesses");
+        TEST_ASSERT(distinct_keys == 10, "10 distinct keys in trace");
         TEST_ASSERT(hits + misses == accesses, "hits + misses == accesses");
         TEST_ASSERT(misses <= accesses, "misses <= accesses");
         TEST_ASSERT(evictions <= misses, "evictions <= misses");
@@ -374,16 +497,16 @@ static void test_deterministic_replay(void) {
     while (fgets(line2, sizeof(line2), f2) && row < line_count1) {
         char *line1 = lines1[row];
         char policy1[32], policy2[32];
-        parse_csv_field(line1, 5, policy1, sizeof(policy1));
-        parse_csv_field(line2, 5, policy2, sizeof(policy2));
+        parse_csv_field(line1, 6, policy1, sizeof(policy1));
+        parse_csv_field(line2, 6, policy2, sizeof(policy2));
 
         if (strcmp(policy1, policy2) == 0) {
-            uint64_t hits1 = parse_csv_uint64(line1, 6);
-            uint64_t hits2 = parse_csv_uint64(line2, 6);
-            uint64_t misses1 = parse_csv_uint64(line1, 7);
-            uint64_t misses2 = parse_csv_uint64(line2, 7);
-            uint64_t evictions1 = parse_csv_uint64(line1, 8);
-            uint64_t evictions2 = parse_csv_uint64(line2, 8);
+            uint64_t hits1 = parse_csv_uint64(line1, 7);
+            uint64_t hits2 = parse_csv_uint64(line2, 7);
+            uint64_t misses1 = parse_csv_uint64(line1, 8);
+            uint64_t misses2 = parse_csv_uint64(line2, 8);
+            uint64_t evictions1 = parse_csv_uint64(line1, 9);
+            uint64_t evictions2 = parse_csv_uint64(line2, 9);
 
             TEST_ASSERT(hits1 == hits2, "Hits are deterministic");
             TEST_ASSERT(misses1 == misses2, "Misses are deterministic");
@@ -411,7 +534,7 @@ static void test_all_policies_on_same_trace(void) {
 
     char policies[3][32];
     for (int i = 0; i < 3; i++) {
-        parse_csv_field(lines[i + 1], 5, policies[i], sizeof(policies[i]));
+        parse_csv_field(lines[i + 1], 6, policies[i], sizeof(policies[i]));
     }
 
     bool has_fifo = false, has_lru = false, has_sieve = false;
@@ -453,6 +576,81 @@ static void test_workload_and_seed_metadata(void) {
     }
 
     free_csv_lines(lines, line_count);
+}
+
+/* =========================================================================
+ * Strict trace parsing regression tests (Fix #1)
+ *
+ * These tests call read_trace_keys() directly to verify that the parser:
+ *   - accepts a valid one-integer-per-line file
+ *   - rejects lines with trailing garbage ("1 garbage")
+ *   - rejects lines with two integers ("1 2")
+ *   - rejects negative numbers ("-1")
+ *   - rejects integers that exceed UINT64_MAX
+ *   - skips (does not reject) blank / whitespace-only lines
+ * ========================================================================= */
+
+/* Helper: write content to TEST_TRACE_FILE and call read_trace_keys on it.
+ * Returns the read_trace_keys return value; frees *keys if allocated. */
+static int try_parse_trace(const char *content, uint64_t **keys_out, size_t *count_out) {
+    write_trace_file(content);
+    *keys_out = NULL;
+    *count_out = 0;
+    return read_trace_keys(TEST_TRACE_FILE, keys_out, count_out);
+}
+
+static void test_trace_parsing_strict(void) {
+    uint64_t *keys = NULL;
+    size_t count = 0;
+    int rc;
+
+    /* --- Valid trace: three keys, one per line --- */
+    rc = try_parse_trace("10\n20\n30\n", &keys, &count);
+    TEST_ASSERT(rc == 0,     "Valid trace accepted");
+    TEST_ASSERT(count == 3,  "Parsed exactly 3 keys");
+    TEST_ASSERT(keys != NULL && keys[0] == 10 && keys[1] == 20 && keys[2] == 30,
+                "Keys have correct values");
+    free(keys); keys = NULL; count = 0;
+
+    /* --- Valid trace: key zero is accepted (require_positive=false) --- */
+    rc = try_parse_trace("0\n1\n", &keys, &count);
+    TEST_ASSERT(rc == 0,    "Trace with key 0 accepted");
+    TEST_ASSERT(count == 2, "Parsed 2 keys including 0");
+    free(keys); keys = NULL; count = 0;
+
+    /* --- Trailing garbage: "1 garbage" must be rejected --- */
+    rc = try_parse_trace("1 garbage\n2\n", &keys, &count);
+    TEST_ASSERT(rc != 0,   "Line '1 garbage' is rejected");
+    TEST_ASSERT(keys == NULL || (free(keys), keys = NULL, 1),
+                "No keys returned on trailing-garbage failure");
+    count = 0;
+
+    /* --- Two integers on one line: "1 2" must be rejected --- */
+    rc = try_parse_trace("1 2\n3\n", &keys, &count);
+    TEST_ASSERT(rc != 0,   "Line '1 2' (two integers) is rejected");
+    if (keys) { free(keys); keys = NULL; }
+    count = 0;
+
+    /* --- Negative number: "-1" must be rejected --- */
+    rc = try_parse_trace("-1\n", &keys, &count);
+    TEST_ASSERT(rc != 0,   "Negative key '-1' is rejected");
+    if (keys) { free(keys); keys = NULL; }
+    count = 0;
+
+    /* --- Integer overflow: value beyond UINT64_MAX must be rejected ---
+     * UINT64_MAX is 18446744073709551615; add 1 digit to ensure overflow. */
+    rc = try_parse_trace("99999999999999999999\n", &keys, &count);
+    TEST_ASSERT(rc != 0,   "Overflowing integer is rejected");
+    if (keys) { free(keys); keys = NULL; }
+    count = 0;
+
+    /* --- Whitespace-only lines are silently skipped (not errors) --- */
+    rc = try_parse_trace("\n   \n5\n\t\n10\n", &keys, &count);
+    TEST_ASSERT(rc == 0,     "Trace with whitespace-only lines accepted");
+    TEST_ASSERT(count == 2,  "Whitespace-only lines skipped; 2 real keys parsed");
+    TEST_ASSERT(keys != NULL && keys[0] == 5 && keys[1] == 10,
+                "Correct keys after skipping blank lines");
+    free(keys); keys = NULL; count = 0;
 }
 
 int main(void) {
@@ -502,6 +700,14 @@ int main(void) {
     test_csv_header_and_row_count();
     printf("  -> CSV format validation passed.\n\n");
 
+    printf("[TEST] Multiple capacities:\n");
+    test_multiple_capacities();
+    printf("  -> Multiple capacities benchmark passed.\n\n");
+
+    printf("[TEST] CSV escaping:\n");
+    test_csv_escaping();
+    printf("  -> CSV escaping passed.\n\n");
+
     printf("[TEST] Metric invariants:\n");
     test_metric_invariants();
     printf("  -> Metric invariants validated.\n\n");
@@ -517,6 +723,10 @@ int main(void) {
     printf("[TEST] Workload and seed metadata:\n");
     test_workload_and_seed_metadata();
     printf("  -> Metadata preservation verified.\n\n");
+
+    printf("[TEST] Strict trace line parsing:\n");
+    test_trace_parsing_strict();
+    printf("  -> Strict parsing regression tests passed.\n\n");
 
     cleanup_test_dir();
 

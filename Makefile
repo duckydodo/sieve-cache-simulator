@@ -44,6 +44,7 @@ test: bin/test_ds bin/test_policies bin/test_tracegen bin/tracegen bin/test_benc
 	./bin/test_policies
 	./bin/test_tracegen
 	./bin/test_benchmark
+	python3 -m unittest tests/test_experiment_runner.py
 
 # Run the full Milestone 6 experiment (generates traces, benchmarks, and CSVs)
 experiment: all
